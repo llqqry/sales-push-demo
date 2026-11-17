@@ -1,0 +1,19 @@
+{
+  "name": "Sales Performance Monitor",
+  "short_name": "Sales Monitor",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a1020",
+  "theme_color": "#0a1020",
+  "description": "Mobile sales drop alerts demo",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
