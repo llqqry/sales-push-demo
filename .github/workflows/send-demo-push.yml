@@ -1,0 +1,25 @@
+name: Send a test sales drop push
+on:
+  workflow_dispatch:
+    inputs:
+      outlet_id:
+        description: 'Outlet A triggers a demo alert at 20% threshold'
+        required: true
+        default: A
+        type: choice
+        options: [A, B, C, D]
+permissions:
+  contents: read
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Send push to subscribed phones
+        env:
+          ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          DEMO_OUTLET_ID: ${{ inputs.outlet_id }}
+        run: python3 scripts/send_demo_alert.py
