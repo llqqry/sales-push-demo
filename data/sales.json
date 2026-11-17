@@ -1,0 +1,29 @@
+{
+  "updated": "Demo data, not live",
+  "outlets": [
+    {
+      "id": "A",
+      "name": "Outlet A",
+      "today": 620,
+      "lastWeek": 900
+    },
+    {
+      "id": "B",
+      "name": "Outlet B",
+      "today": 1250,
+      "lastWeek": 1300
+    },
+    {
+      "id": "C",
+      "name": "Outlet C",
+      "today": 1850,
+      "lastWeek": 1700
+    },
+    {
+      "id": "D",
+      "name": "Outlet D",
+      "today": 1470,
+      "lastWeek": 1600
+    }
+  ]
+}
