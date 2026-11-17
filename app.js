@@ -6,9 +6,32 @@ const cfg=window.SALES_PUSH_CONFIG||{};
 const appId=String(cfg.oneSignalAppId||"").trim();
 let sales=null,threshold=20,oneSignal=null,demoSW=null;
 let timer;
+let lastWorkerError = "";
 const workerURL=new URL("./push/onesignal/OneSignalSDKWorker.js",location.href);
 const workerScope=new URL("./push/onesignal/",location.href).pathname;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function ensureRemoteWorker(){
+  if(!("serviceWorker" in navigator))throw Error("This browser does not support service workers.");
+  try{
+    let reg=await navigator.serviceWorker.getRegistration(workerScope);
+    if(!reg || !reg.active){
+      reg=await navigator.serviceWorker.register(workerURL.pathname,{
+        scope:workerScope,
+        updateViaCache:"none"
+      });
+    }
+    for(let i=0;i<15&&!reg.active;i++){
+      await sleep(500);
+      reg=await navigator.serviceWorker.getRegistration(workerScope)||reg;
+    }
+    if(!reg.active)throw Error("The service worker registered but did not become active. Check the script or network.");
+    lastWorkerError="";
+    return reg;
+  }catch(error){
+    lastWorkerError=(error.name||"Error")+": "+error.message;
+    throw error;
+  }
+}
 function isSubscribed(){
  if(!oneSignal)return false;
  const sub=oneSignal.User.PushSubscription;
@@ -32,6 +55,7 @@ async function showDiagnostics(){
    const regs=await navigator.serviceWorker.getRegistrations();
    const match=regs.find(reg=>reg.scope.endsWith(workerScope));
    add("OneSignal worker installed",match?(match.active?"Active":match.installing?"Installing":match.waiting?"Waiting":"Registered"):"NO");
+   if(lastWorkerError)add("Last worker registration error",lastWorkerError);
    add("Registered scopes",regs.length?regs.map(reg=>new URL(reg.scope).pathname).join(", "):"None");
   }catch(err){add("Worker registration error",err.message)}
  }
@@ -134,7 +158,15 @@ async function enable(){
      if(!oneSignal){status("OneSignal is not connected yet. Check your OneSignal Web site URL and reload the dashboard.");return}
      await oneSignal.Notifications.requestPermission();
      if(Notification.permission!=="granted"){status("Notification permission not granted. Check your browser or mobile notification settings.");return}
-     status("Permission granted. Waiting for OneSignal to finish registering this phone...");
+     status("Permission granted. Registering push service worker...");
+     try{
+       await ensureRemoteWorker();
+     }catch(workerError){
+       status("Service worker installation failed: "+workerError.message+". Tap Check push setup to see details.");
+       await showDiagnostics();
+       return;
+     }
+     status("Push service worker active. Registering OneSignal subscription...");
      await oneSignal.User.PushSubscription.optIn();
      const active=await awaitSubscription();
      refreshSubscription();
@@ -175,6 +207,20 @@ async function init(){
  $("threshold").addEventListener("input",e=>{threshold=Number(e.target.value);render()});
  $("enableBtn").addEventListener("click",enable);
  $("testBtn").addEventListener("click",simulate);
+ $("retryBtn").addEventListener("click",async()=>{
+   status("Attempting to register the OneSignal service worker...");
+   try{
+      await ensureRemoteWorker();
+      status("Service worker active. Trying to finish push subscription...");
+      if(oneSignal && Notification.permission==="granted"){
+        await oneSignal.User.PushSubscription.optIn();
+        await awaitSubscription();
+        refreshSubscription();
+      }
+   }catch(e){status("Registration failed: "+e.message)}
+   await showDiagnostics();
+   if(isSubscribed())status("✓ REAL PUSH SUBSCRIBED. Send a test from OneSignal.");
+ });
  $("diagnoseBtn").addEventListener("click",async()=>{
    status("Checking service worker and OneSignal registration...");
    await showDiagnostics();
