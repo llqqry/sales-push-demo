@@ -6,6 +6,55 @@ const cfg=window.SALES_PUSH_CONFIG||{};
 const appId=String(cfg.oneSignalAppId||"").trim();
 let sales=null,threshold=20,oneSignal=null,demoSW=null;
 let timer;
+const workerURL=new URL("./push/onesignal/OneSignalSDKWorker.js",location.href);
+const workerScope=new URL("./push/onesignal/",location.href).pathname;
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function isSubscribed(){
+ if(!oneSignal)return false;
+ const sub=oneSignal.User.PushSubscription;
+ return Boolean(sub.optedIn && sub.id && sub.token);
+}
+async function showDiagnostics(){
+ const lines=[];
+ const add=(k,v)=>lines.push(k+": "+v);
+ const standalone=!!(window.navigator.standalone||window.matchMedia("(display-mode: standalone)").matches);
+ add("Home Screen app",standalone?"Yes":"No — open from Home Screen icon");
+ add("Notification permission",("Notification" in window)?Notification.permission:"API unavailable");
+ add("Service worker supported",("serviceWorker" in navigator)?"Yes":"No");
+ add("Expected site origin","https://llqqry.github.io");
+ try{
+   const res=await fetch(workerURL.href,{cache:"no-store"});
+   add("OneSignal worker file",res.status+" "+(res.ok?"OK":"ERROR"));
+   add("Worker MIME type",res.headers.get("content-type")||"unknown");
+ }catch(err){add("Worker fetch error",err.message)}
+ if("serviceWorker" in navigator){
+  try{
+   const regs=await navigator.serviceWorker.getRegistrations();
+   const match=regs.find(reg=>reg.scope.endsWith(workerScope));
+   add("OneSignal worker installed",match?(match.active?"Active":match.installing?"Installing":match.waiting?"Waiting":"Registered"):"NO");
+   add("Registered scopes",regs.length?regs.map(reg=>new URL(reg.scope).pathname).join(", "):"None");
+  }catch(err){add("Worker registration error",err.message)}
+ }
+ add("OneSignal initialized",oneSignal?"Yes":"No");
+ if(oneSignal){
+   const sub=oneSignal.User.PushSubscription;
+   add("Push supported by SDK",oneSignal.Notifications.isPushSupported());
+   add("OneSignal opted in",String(sub.optedIn));
+   add("Push token generated",sub.token?"Yes":"No");
+   add("OneSignal subscription ID",sub.id||"Not created");
+ }
+ const out=$("diagnostics");
+ out.textContent=lines.join("\n");
+ out.hidden=false;
+ return lines;
+}
+async function awaitSubscription(){
+ for(let i=0;i<12;i++){
+   if(isSubscribed())return true;
+   await sleep(750);
+ }
+ return isSubscribed();
+}
 function refreshSubscription(){
  if(!oneSignal)return;
  const sub=oneSignal.User.PushSubscription;
@@ -63,13 +112,19 @@ async function setupPush(){
  window.OneSignalDeferred=window.OneSignalDeferred||[];
  window.OneSignalDeferred.push(async OneSignal=>{
    try{
-     const workerUrl=new URL("./push/onesignal/OneSignalSDKWorker.js",location.href);
-     const scope=new URL("./push/onesignal/",location.href).pathname;
-     await OneSignal.init({appId,serviceWorkerPath:workerUrl.pathname.slice(1),serviceWorkerParam:{scope}});
+     await OneSignal.init({
+       appId,
+       serviceWorkerPath:workerURL.pathname.slice(1),
+       serviceWorkerParam:{scope:workerScope},
+     });
      oneSignal=OneSignal;
      OneSignal.User.PushSubscription.addEventListener("change",refreshSubscription);
+     document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSubscription()});
      refreshSubscription();
-   }catch(e){$("pushState").textContent="OneSignal setup error: "+e.message}
+   }catch(e){
+     $("pushState").textContent="OneSignal setup error: "+e.message;
+     status("OneSignal setup error: "+e.message+". Tap Check push setup for details.");
+   }
  });
 }
 async function enable(){
@@ -79,12 +134,15 @@ async function enable(){
      if(!oneSignal){status("OneSignal is not connected yet. Check your OneSignal Web site URL and reload the dashboard.");return}
      await oneSignal.Notifications.requestPermission();
      if(Notification.permission!=="granted"){status("Notification permission not granted. Check your browser or mobile notification settings.");return}
+     status("Permission granted. Waiting for OneSignal to finish registering this phone...");
      await oneSignal.User.PushSubscription.optIn();
+     const active=await awaitSubscription();
      refreshSubscription();
-     if(oneSignal.User.PushSubscription.optedIn&&oneSignal.User.PushSubscription.token){
-       status("Your phone is registered for REAL push. Close the app and send a test from your OneSignal dashboard.");
+     if(active){
+       status("✓ Real push subscription active. Close the app and send a test from OneSignal!");
      }else{
-       status("Permission granted, but remote push subscription is not active yet. Check OneSignal Web settings and the Audience → Subscriptions list.");
+       status("Permission granted, but OneSignal did not complete registration. Tap Check push setup below to identify the issue.");
+       await showDiagnostics();
      }
      return;
    }
@@ -117,6 +175,11 @@ async function init(){
  $("threshold").addEventListener("input",e=>{threshold=Number(e.target.value);render()});
  $("enableBtn").addEventListener("click",enable);
  $("testBtn").addEventListener("click",simulate);
+ $("diagnoseBtn").addEventListener("click",async()=>{
+   status("Checking service worker and OneSignal registration...");
+   await showDiagnostics();
+   status(isSubscribed()?"✓ Real push subscription active.":"Diagnostics complete. See results below. If worker is missing, check OneSignal's site origin and Web settings.");
+ });
  try{const res=await fetch("./data/sales.json",{cache:"no-store"});if(!res.ok)throw Error("HTTP "+res.status);sales=await res.json();render()}
  catch(e){status("Could not load data: "+e.message)}
  setupPush();
