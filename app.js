@@ -6,6 +6,15 @@ const cfg=window.SALES_PUSH_CONFIG||{};
 const appId=String(cfg.oneSignalAppId||"").trim();
 let sales=null,threshold=20,oneSignal=null,demoSW=null;
 let timer;
+function refreshSubscription(){
+ if(!oneSignal)return;
+ const sub=oneSignal.User.PushSubscription;
+ const ready=Boolean(sub.optedIn && sub.id && sub.token);
+ $("pushState").textContent=ready
+   ? "✓ REAL PUSH SUBSCRIBED. You can now close the app and send a remote push from your OneSignal dashboard. Subscription ID: "+sub.id
+   : "OneSignal connected, but this phone is NOT subscribed for remote push yet. Tap Enable notifications, then confirm your subscription appears in OneSignal → Audience → Subscriptions.";
+ $("enableBtn").textContent=ready?"✓ Real push subscribed":"1 · Enable notifications";
+}
 const growth=(a,b)=>b>0?100*(a/b-1):0;
 function status(t){$("status").textContent=t}
 function toast(t){const el=$("toast");el.textContent=t;el.classList.add("show");clearTimeout(timer);timer=setTimeout(()=>el.classList.remove("show"),4000)}
@@ -58,18 +67,32 @@ async function setupPush(){
      const scope=new URL("./push/onesignal/",location.href).pathname;
      await OneSignal.init({appId,serviceWorkerPath:workerUrl.pathname.slice(1),serviceWorkerParam:{scope}});
      oneSignal=OneSignal;
-     $("pushState").textContent="OneSignal connected. Enable notifications, then send a remote alert from OneSignal or GitHub Actions.";
+     OneSignal.User.PushSubscription.addEventListener("change",refreshSubscription);
+     refreshSubscription();
    }catch(e){$("pushState").textContent="OneSignal setup error: "+e.message}
  });
 }
 async function enable(){
- if(!("Notification" in window)){status("Notifications unavailable. On iPhone, add the website to Home Screen, then open from the icon.");return}
+ if(!("Notification" in window)){status("Notifications unavailable. On iPhone, add the website to Home Screen, then open it from the icon.");return}
  try{
-   const permission=oneSignal?(await oneSignal.Notifications.requestPermission(),Notification.permission):await Notification.requestPermission();
+   if(appId){
+     if(!oneSignal){status("OneSignal is not connected yet. Check your OneSignal Web site URL and reload the dashboard.");return}
+     await oneSignal.Notifications.requestPermission();
+     if(Notification.permission!=="granted"){status("Notification permission not granted. Check your browser or mobile notification settings.");return}
+     await oneSignal.User.PushSubscription.optIn();
+     refreshSubscription();
+     if(oneSignal.User.PushSubscription.optedIn&&oneSignal.User.PushSubscription.token){
+       status("Your phone is registered for REAL push. Close the app and send a test from your OneSignal dashboard.");
+     }else{
+       status("Permission granted, but remote push subscription is not active yet. Check OneSignal Web settings and the Audience → Subscriptions list.");
+     }
+     return;
+   }
+   const permission=await Notification.requestPermission();
    if(permission==="granted"){
-     if(!appId)await demoRegistration();
+     await demoRegistration();
      $("enableBtn").textContent="✓ Notifications allowed";
-     status(appId?"Permission granted. Verify subscription in OneSignal for closed-site push.":"Permission granted. Tap Simulate sales drop to see a local notification.");
+     status("Permission granted for local demo notifications.");
    }else status("Permission not granted. Check your mobile notification settings.");
  }catch(e){status("Could not enable notifications: "+e.message)}
 }
